@@ -282,6 +282,9 @@ class LeveragedLPAnalyzer:
         ax.axvspan(results.price_lower, results.price_upper, alpha=0.15, 
                    color='green', label=f'LP Range (${results.price_lower:,.0f}-${results.price_upper:,.0f})')
         
+        # Find and mark crossover points where equity curve crosses LP range boundaries
+        self._add_range_crossover_markers(ax, price_range, final_equities, results.price_lower, results.price_upper)
+        
         # Profit/loss regions
         self._add_profit_loss_regions(ax, price_range, final_equities, results.initial_equity_usd)
         
@@ -354,6 +357,9 @@ class LeveragedLPAnalyzer:
         ax.axvspan(results1.price_lower, results1.price_upper, alpha=0.15,
                    color='green', label=f'LP Range')
         
+        # Find and mark crossover points for the combined portfolio
+        self._add_range_crossover_markers(ax, price_range, combined_equities, results1.price_lower, results1.price_upper)
+        
         # Profit/loss regions for combined portfolio
         self._add_profit_loss_regions(ax, price_range, combined_equities, combined_initial_equity)
         
@@ -373,6 +379,98 @@ class LeveragedLPAnalyzer:
         
         # Print combined analysis
         self._print_combined_analysis(config1, config2, results1, results2)
+    
+    def _add_range_crossover_markers(self, ax, price_range: np.ndarray, final_equities: List[float], 
+                                    range_lower: float, range_upper: float) -> None:
+        """
+        Add markers where the equity curve crosses the LP range boundaries.
+        
+        Args:
+            ax: matplotlib axis object
+            price_range: array of price values
+            final_equities: corresponding equity values
+            range_lower: lower bound of LP range
+            range_upper: upper bound of LP range
+        """
+        final_equities_array = np.array(final_equities)
+        
+        # Find crossover points with range boundaries
+        crossover_points = []
+        
+        # Check for crossovers at each price point
+        for i in range(len(price_range)):
+            price = price_range[i]
+            
+            # Check if price crosses lower boundary
+            if i > 0:
+                prev_price = price_range[i-1]
+                curr_price = price
+                
+                # Crossing lower boundary
+                if (prev_price > range_lower and curr_price <= range_lower) or \
+                   (prev_price <= range_lower and curr_price > range_lower):
+                    # Interpolate to find exact crossover point
+                    if abs(curr_price - range_lower) < abs(prev_price - range_lower):
+                        crossover_price = curr_price
+                        crossover_equity = final_equities_array[i]
+                    else:
+                        crossover_price = prev_price
+                        crossover_equity = final_equities_array[i-1]
+                    
+                    crossover_points.append({
+                        'price': range_lower,
+                        'equity': self._interpolate_equity_at_price(price_range, final_equities_array, range_lower),
+                        'boundary': 'Lower'
+                    })
+                
+                # Crossing upper boundary
+                if (prev_price < range_upper and curr_price >= range_upper) or \
+                   (prev_price >= range_upper and curr_price < range_upper):
+                    crossover_points.append({
+                        'price': range_upper,
+                        'equity': self._interpolate_equity_at_price(price_range, final_equities_array, range_upper),
+                        'boundary': 'Upper'
+                    })
+        
+        # Remove duplicate crossover points (keep unique boundaries)
+        unique_crossovers = {}
+        for point in crossover_points:
+            key = f"{point['boundary']}_{point['price']:.0f}"
+            if key not in unique_crossovers:
+                unique_crossovers[key] = point
+        
+        # Add markers for crossover points
+        for point in unique_crossovers.values():
+            # Add a prominent marker
+            ax.plot(point['price'], point['equity'], 
+                   marker='o', markersize=8, color='red', 
+                   markeredgecolor='darkred', markeredgewidth=2, 
+                   zorder=10)
+            
+            # Add price label with annotation
+            offset_y = point['equity'] * 0.05 if point['boundary'] == 'Upper' else -point['equity'] * 0.05
+            ax.annotate(f"${point['price']:,.0f}\n${point['equity']:,.0f}", 
+                       xy=(point['price'], point['equity']),
+                       xytext=(point['price'], point['equity'] + offset_y),
+                       ha='center', va='bottom' if point['boundary'] == 'Upper' else 'top',
+                       fontsize=9, fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.8),
+                       arrowprops=dict(arrowstyle='->', color='red', lw=1.5))
+
+    def _interpolate_equity_at_price(self, price_range: np.ndarray, 
+                                   final_equities: np.ndarray, target_price: float) -> float:
+        """
+        Interpolate the equity value at a specific target price.
+        
+        Args:
+            price_range: array of price values
+            final_equities: corresponding equity values
+            target_price: price at which to interpolate equity
+            
+        Returns:
+            Interpolated equity value
+        """
+        return np.interp(target_price, price_range, final_equities)
     
     def _calculate_daily_breakeven_line(self, config: PositionConfig, results: AnalysisResults, 
                                        price_range: np.ndarray) -> np.ndarray:
