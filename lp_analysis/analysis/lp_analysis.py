@@ -138,3 +138,188 @@ class LPAnalyzer:
         result.metrics['impermanent_loss'] = cls.calculate_impermanent_loss(result)
         
         return result
+
+
+class ExposureAnalyzer:
+    """
+    Advanced exposure analysis for LP positions.
+    Calculates net exposure to volatile assets considering debt.
+    """
+    
+    @staticmethod
+    def calculate_net_exposure(position: LeveragedPosition) -> Dict[str, float]:
+        """
+        Calculate net exposure to each asset accounting for debt.
+        
+        Net Exposure = LP Holdings - Debt
+        
+        For volatile asset (asset0) exposure optimization:
+        - Long exposure: holding asset0 in LP
+        - Short exposure: owing asset0 as debt
+        
+        Returns:
+            Dict with net exposure metrics
+        """
+        # LP holdings
+        lp_asset0 = position.amount0
+        lp_asset1 = position.amount1
+        
+        # Debt
+        debt_asset0 = position.debt_amount0
+        debt_asset1 = position.debt_amount1
+        
+        # Net exposure (in token terms)
+        net_asset0 = lp_asset0 - debt_asset0
+        net_asset1 = lp_asset1 - debt_asset1
+        
+        # Net exposure in asset1 value terms
+        net_asset0_value = net_asset0 * position.current_price
+        net_asset1_value = net_asset1
+        
+        # Total net value
+        total_net_value = net_asset0_value + net_asset1_value
+        
+        # Exposure percentages
+        asset0_exposure_pct = (net_asset0_value / total_net_value * 100) if total_net_value != 0 else 0
+        asset1_exposure_pct = (net_asset1_value / total_net_value * 100) if total_net_value != 0 else 0
+        
+        return {
+            'net_asset0_tokens': net_asset0,
+            'net_asset1_tokens': net_asset1,
+            'net_asset0_value': net_asset0_value,
+            'net_asset1_value': net_asset1_value,
+            'total_net_value': total_net_value,
+            'asset0_exposure_pct': asset0_exposure_pct,
+            'asset1_exposure_pct': asset1_exposure_pct,
+            'is_long_asset0': net_asset0 > 0,
+            'is_short_asset0': net_asset0 < 0
+        }
+    
+    @staticmethod
+    def calculate_exposure_profile(result: SimulationResult) -> Dict:
+        """
+        Calculate comprehensive exposure profile across price range.
+        
+        Returns:
+            Dict with exposure metrics at each price point
+        """
+        if not isinstance(result.positions[0], LeveragedPosition):
+            # For non-leveraged, exposure = holdings
+            asset0_exposure = [p.amount0 for p in result.positions]
+            asset1_exposure = [p.amount1 for p in result.positions]
+            
+            return {
+                'prices': result.prices,
+                'asset0_net_tokens': asset0_exposure,
+                'asset1_net_tokens': asset1_exposure,
+                'asset0_net_value': [a0 * p for a0, p in zip(asset0_exposure, result.prices)],
+                'asset1_net_value': asset1_exposure,
+                'asset0_exposure_pct': [],
+                'asset1_exposure_pct': [],
+                'is_leveraged': False
+            }
+        
+        # Leveraged positions
+        net_exposures = [ExposureAnalyzer.calculate_net_exposure(pos) 
+                        for pos in result.positions]
+        
+        return {
+            'prices': result.prices,
+            'asset0_net_tokens': [exp['net_asset0_tokens'] for exp in net_exposures],
+            'asset1_net_tokens': [exp['net_asset1_tokens'] for exp in net_exposures],
+            'asset0_net_value': [exp['net_asset0_value'] for exp in net_exposures],
+            'asset1_net_value': [exp['net_asset1_value'] for exp in net_exposures],
+            'asset0_exposure_pct': [exp['asset0_exposure_pct'] for exp in net_exposures],
+            'asset1_exposure_pct': [exp['asset1_exposure_pct'] for exp in net_exposures],
+            'total_net_value': [exp['total_net_value'] for exp in net_exposures],
+            'is_leveraged': True
+        }
+    
+    @staticmethod
+    def calculate_exposure_delta(result: SimulationResult) -> Dict:
+        """
+        Calculate exposure delta (sensitivity of exposure to price changes).
+        
+        This shows how net exposure changes as price moves.
+        Critical for understanding rebalancing needs.
+        
+        Returns:
+            Dict with exposure delta metrics
+        """
+        exposure_profile = ExposureAnalyzer.calculate_exposure_profile(result)
+        
+        if not exposure_profile['is_leveraged']:
+            return {'message': 'Exposure delta only relevant for leveraged positions'}
+        
+        prices = np.array(exposure_profile['prices'])
+        asset0_net_tokens = np.array(exposure_profile['asset0_net_tokens'])
+        asset0_net_value = np.array(exposure_profile['asset0_net_value'])
+        
+        # Delta of net asset0 tokens vs price (should be relatively flat due to debt)
+        token_delta = np.gradient(asset0_net_tokens, prices)
+        
+        # Delta of net asset0 value vs price
+        value_delta = np.gradient(asset0_net_value, prices)
+        
+        return {
+            'token_delta': token_delta.tolist(),
+            'value_delta': value_delta.tolist(),
+            'max_token_delta': float(np.max(np.abs(token_delta))),
+            'max_value_delta': float(np.max(np.abs(value_delta)))
+        }
+    
+    @classmethod
+    def analyze_exposure(cls, result: SimulationResult) -> SimulationResult:
+        """
+        Add comprehensive exposure analysis to simulation result.
+        
+        Returns:
+            SimulationResult with exposure metrics added
+        """
+        result.metrics['exposure_profile'] = cls.calculate_exposure_profile(result)
+        result.metrics['exposure_delta'] = cls.calculate_exposure_delta(result)
+        
+        return result
+    
+    @staticmethod
+    def compare_exposure_strategies(results_list: List[SimulationResult]) -> Dict:
+        """
+        Compare exposure profiles across multiple strategies.
+        
+        Useful for optimizing exposure by comparing:
+        - ASSET0 debt vs ASSET1 debt
+        - Different leverage levels
+        - Different price ranges
+        
+        Args:
+            results_list: List of SimulationResult objects to compare
+            
+        Returns:
+            Dict with comparison metrics
+        """
+        comparison = {
+            'strategies': [],
+            'initial_price': results_list[0].config.price_initial
+        }
+        
+        for i, result in enumerate(results_list):
+            exposure_profile = ExposureAnalyzer.calculate_exposure_profile(result)
+            
+            # Find exposure at initial price
+            initial_idx = min(range(len(result.prices)), 
+                            key=lambda i: abs(result.prices[i] - result.config.price_initial))
+            
+            config = result.config
+            strategy_info = {
+                'name': f"{config.assets.asset0_symbol}/{config.assets.asset1_symbol}",
+                'leverage': getattr(config, 'leverage', 1.0),
+                'debt_asset': getattr(config, 'debt_asset', 'NONE'),
+                'initial_asset0_exposure_pct': exposure_profile['asset0_exposure_pct'][initial_idx] if exposure_profile['is_leveraged'] else 0,
+                'initial_asset1_exposure_pct': exposure_profile['asset1_exposure_pct'][initial_idx] if exposure_profile['is_leveraged'] else 0,
+                'avg_asset0_exposure_pct': np.mean(exposure_profile['asset0_exposure_pct']) if exposure_profile['is_leveraged'] else 0,
+                'exposure_stability': np.std(exposure_profile['asset0_exposure_pct']) if exposure_profile['is_leveraged'] else 0
+            }
+            
+            comparison['strategies'].append(strategy_info)
+        
+        return comparison

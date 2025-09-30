@@ -7,9 +7,9 @@ from .lp_calc.types import (
 )
 from .lp_calc.lp_calc import LPCalculator
 from .lp_calc.lev_lp_calc import LeveragedLPCalculator
-from .analysis.lp_analysis import LPAnalyzer
+from .analysis.lp_analysis import LPAnalyzer, ExposureAnalyzer
 from .analysis.lp_risk import RiskAnalyzer
-from .visualization.plots import LPVisualizer
+from .visualization.plots import LPVisualizer, ExposureVisualizer
 
 __version__ = "1.0.0"
 __all__ = [
@@ -19,7 +19,7 @@ __all__ = [
     # Calculators
     'LPCalculator', 'LeveragedLPCalculator',
     # Analyzers
-    'LPAnalyzer', 'RiskAnalyzer',
+    'LPAnalyzer', 'ExposureAnalyzer', 'RiskAnalyzer',
     # Visualization
-    'LPVisualizer'
+    'LPVisualizer', 'ExposureVisualizer'
 ]

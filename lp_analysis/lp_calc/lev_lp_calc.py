@@ -33,8 +33,8 @@ class LeveragedLPCalculator(LPCalculator):
             LeveragedPosition with debt tracking
         """
         # Total capital after leverage
-        borrowed_value = config.capital_asset1 * (config.effective_leverage - 1)
-        total_value = config.capital_asset1 * config.effective_leverage
+        borrowed_value = config.capital_asset1 * (config.leverage - 1)
+        total_value = config.capital_asset1 * config.leverage
         
         # Calculate LP composition
         initial_pos = super().calculate_initial_position(
