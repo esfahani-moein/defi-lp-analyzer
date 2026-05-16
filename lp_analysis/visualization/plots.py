@@ -205,8 +205,357 @@ class LPVisualizer:
             ax7.axis('off')
         
         plt.suptitle(f'{result.config.assets} LP Analysis', fontsize=16, fontweight='bold')
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
         plt.show()
+    
+    @staticmethod
+    def plot_combined_positions_dashboard(
+        result1: SimulationResult,
+        result2: SimulationResult,
+        position1_name: str = "Position 1",
+        position2_name: str = "Position 2"
+    ):
+        """
+        Plot comprehensive dashboard comparing and combining two LP positions.
+        
+        This is particularly useful for analyzing delta-neutral strategies where
+        one position has USDC debt (long exposure) and another has ETH debt (short exposure).
+        
+        Args:
+            result1: First simulation result (e.g., USDC debt / Long ETH)
+            result2: Second simulation result (e.g., ETH debt / Short ETH)
+            position1_name: Display name for first position
+            position2_name: Display name for second position
+        """
+        # Validate inputs
+        if not hasattr(result1, 'metrics') or not hasattr(result2, 'metrics'):
+            raise ValueError("Both results must be analyzed first (call LPAnalyzer.analyze_simulation)")
+        
+        # Create figure with subplots
+        fig = plt.figure(figsize=(20, 16))
+        gs = fig.add_gridspec(4, 3, hspace=0.3, wspace=0.3)
+        
+        # Color scheme
+        color1 = '#2E86AB'  # Blue for position 1
+        color2 = '#A23B72'  # Purple for position 2
+        color_combined = '#F18F01'  # Orange for combined
+        
+        # Get exposure data if available
+        has_exposure = ('exposure' in result1.metrics and 'exposure' in result2.metrics)
+        
+        if has_exposure:
+            exposure1 = result1.metrics['exposure']
+            exposure2 = result2.metrics['exposure']
+        
+        # Get position values
+        if isinstance(result1.positions[0], LeveragedPosition):
+            pos_values1 = np.array([p.equity_asset1 for p in result1.positions])
+            pos_values2 = np.array([p.equity_asset1 for p in result2.positions])
+        else:
+            pos_values1 = np.array([p.amount0 * p.current_price + p.amount1 for p in result1.positions])
+            pos_values2 = np.array([p.amount0 * p.current_price + p.amount1 for p in result2.positions])
+        
+        # 1. Combined Position Value
+        ax1 = fig.add_subplot(gs[0, :])
+        combined_value = pos_values1 + pos_values2
+        
+        ax1.plot(result1.prices, pos_values1, 
+                label=position1_name, color=color1, linewidth=2, alpha=0.7)
+        ax1.plot(result2.prices, pos_values2, 
+                label=position2_name, color=color2, linewidth=2, alpha=0.7)
+        ax1.plot(result1.prices, combined_value, 
+                label='Combined Portfolio', color=color_combined, linewidth=3)
+        
+        # Add initial investment line
+        total_capital = result1.config.capital_asset1 + result2.config.capital_asset1
+        ax1.axhline(y=total_capital, color='gray', linestyle='--', 
+                   label=f'Initial Capital: ${total_capital:,.0f}', alpha=0.5)
+        
+        # Mark current price
+        current_idx = len(result1.prices) // 2
+        ax1.axvline(x=result1.prices[current_idx], color='red', 
+                   linestyle=':', alpha=0.5, label='Current Price')
+        
+        ax1.set_xlabel('ETH Price (USDC)', fontsize=12, fontweight='bold')
+        ax1.set_ylabel('Position Value (USDC)', fontsize=12, fontweight='bold')
+        ax1.set_title('Combined Position Value Across Price Range', 
+                     fontsize=14, fontweight='bold', pad=20)
+        ax1.legend(loc='best', fontsize=10)
+        ax1.grid(True, alpha=0.3)
+        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1000:.0f}K'))
+        
+        # 2. Combined PnL
+        ax2 = fig.add_subplot(gs[1, 0])
+        pnl1 = pos_values1 - result1.config.capital_asset1
+        pnl2 = pos_values2 - result2.config.capital_asset1
+        combined_pnl = pnl1 + pnl2
+        
+        ax2.plot(result1.prices, pnl1, label=position1_name, color=color1, alpha=0.7)
+        ax2.plot(result2.prices, pnl2, label=position2_name, color=color2, alpha=0.7)
+        ax2.plot(result1.prices, combined_pnl, label='Combined PnL', 
+                color=color_combined, linewidth=2.5)
+        ax2.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+        ax2.axvline(x=result1.prices[current_idx], color='red', linestyle=':', alpha=0.3)
+        
+        # Fill profitable/unprofitable regions
+        ax2.fill_between(result1.prices, 0, combined_pnl, 
+                         where=(combined_pnl >= 0), alpha=0.2, 
+                         color='green', label='Profit Zone')
+        ax2.fill_between(result1.prices, 0, combined_pnl, 
+                         where=(combined_pnl < 0), alpha=0.2, 
+                         color='red', label='Loss Zone')
+        
+        ax2.set_xlabel('ETH Price (USDC)', fontsize=10)
+        ax2.set_ylabel('PnL (USDC)', fontsize=10)
+        ax2.set_title('Combined Profit & Loss', fontsize=12, fontweight='bold')
+        ax2.legend(loc='best', fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Delta Exposure Comparison
+        ax3 = fig.add_subplot(gs[1, 1])
+        if has_exposure:
+            delta1 = np.array(exposure1['delta_exposure'])
+            delta2 = np.array(exposure2['delta_exposure'])
+            combined_delta = delta1 + delta2
+            
+            ax3.plot(result1.prices, delta1, label=f'{position1_name} Δ', 
+                    color=color1, alpha=0.7)
+            ax3.plot(result2.prices, delta2, label=f'{position2_name} Δ', 
+                    color=color2, alpha=0.7)
+            ax3.plot(result1.prices, combined_delta, label='Combined Δ (Target: 0)', 
+                    color=color_combined, linewidth=2.5)
+            ax3.axhline(y=0, color='green', linestyle='--', linewidth=2, 
+                       alpha=0.5, label='Delta Neutral')
+            ax3.axvline(x=result1.prices[current_idx], color='red', linestyle=':', alpha=0.3)
+            
+            # Highlight delta-neutral zone
+            ax3.fill_between(result1.prices, -0.1, 0.1, alpha=0.1, 
+                            color='green', label='Near Neutral (±0.1)')
+            
+            ax3.set_xlabel('ETH Price (USDC)', fontsize=10)
+            ax3.set_ylabel('Delta Exposure', fontsize=10)
+            ax3.set_title('Delta Exposure - Hedge Effectiveness', fontsize=12, fontweight='bold')
+            ax3.legend(loc='best', fontsize=8)
+            ax3.grid(True, alpha=0.3)
+        else:
+            ax3.text(0.5, 0.5, 'Exposure Analysis Not Available\nRun ExposureAnalyzer first', 
+                    ha='center', va='center', transform=ax3.transAxes, fontsize=10)
+            ax3.set_title('Delta Exposure', fontsize=12, fontweight='bold')
+        
+        # 4. Returns Distribution
+        ax4 = fig.add_subplot(gs[1, 2])
+        returns1 = (pnl1 / result1.config.capital_asset1) * 100
+        returns2 = (pnl2 / result2.config.capital_asset1) * 100
+        combined_returns = (combined_pnl / total_capital) * 100
+        
+        ax4.hist(returns1, bins=30, alpha=0.5, color=color1, label=position1_name)
+        ax4.hist(returns2, bins=30, alpha=0.5, color=color2, label=position2_name)
+        ax4.hist(combined_returns, bins=30, alpha=0.7, color=color_combined, 
+                label='Combined', edgecolor='black', linewidth=1.5)
+        ax4.axvline(x=0, color='black', linestyle='--', linewidth=1)
+        
+        ax4.set_xlabel('Return (%)', fontsize=10)
+        ax4.set_ylabel('Frequency', fontsize=10)
+        ax4.set_title('Returns Distribution', fontsize=12, fontweight='bold')
+        ax4.legend(loc='best', fontsize=8)
+        ax4.grid(True, alpha=0.3, axis='y')
+        
+        # 5. Asset Holdings - ETH
+        ax5 = fig.add_subplot(gs[2, 0])
+        asset0_amounts1 = np.array([p.amount0 for p in result1.positions])
+        asset0_amounts2 = np.array([p.amount0 for p in result2.positions])
+        
+        ax5.plot(result1.prices, asset0_amounts1, 
+                label=f'{position1_name} ETH', color=color1, linestyle='-', alpha=0.7)
+        ax5.plot(result2.prices, asset0_amounts2, 
+                label=f'{position2_name} ETH', color=color2, linestyle='-', alpha=0.7)
+        combined_eth = asset0_amounts1 + asset0_amounts2
+        ax5.plot(result1.prices, combined_eth, 
+                label='Combined ETH', color=color_combined, linewidth=2.5)
+        ax5.axvline(x=result1.prices[current_idx], color='red', linestyle=':', alpha=0.3)
+        
+        ax5.set_xlabel('ETH Price (USDC)', fontsize=10)
+        ax5.set_ylabel('ETH Amount', fontsize=10)
+        ax5.set_title('ETH Holdings', fontsize=12, fontweight='bold')
+        ax5.legend(loc='best', fontsize=8)
+        ax5.grid(True, alpha=0.3)
+        
+        # 6. Asset Holdings - USDC
+        ax6 = fig.add_subplot(gs[2, 1])
+        asset1_amounts1 = np.array([p.amount1 for p in result1.positions])
+        asset1_amounts2 = np.array([p.amount1 for p in result2.positions])
+        
+        ax6.plot(result1.prices, asset1_amounts1, 
+                label=f'{position1_name} USDC', color=color1, linestyle='-', alpha=0.7)
+        ax6.plot(result2.prices, asset1_amounts2, 
+                label=f'{position2_name} USDC', color=color2, linestyle='-', alpha=0.7)
+        combined_usdc = asset1_amounts1 + asset1_amounts2
+        ax6.plot(result1.prices, combined_usdc, 
+                label='Combined USDC', color=color_combined, linewidth=2.5)
+        ax6.axvline(x=result1.prices[current_idx], color='red', linestyle=':', alpha=0.3)
+        
+        ax6.set_xlabel('ETH Price (USDC)', fontsize=10)
+        ax6.set_ylabel('USDC Amount', fontsize=10)
+        ax6.set_title('USDC Holdings', fontsize=12, fontweight='bold')
+        ax6.legend(loc='best', fontsize=8)
+        ax6.grid(True, alpha=0.3)
+        ax6.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1000:.0f}K'))
+        
+        # 7. Gamma Exposure
+        ax7 = fig.add_subplot(gs[2, 2])
+        if has_exposure:
+            gamma1 = np.array(exposure1['gamma_exposure'])
+            gamma2 = np.array(exposure2['gamma_exposure'])
+            combined_gamma = gamma1 + gamma2
+            
+            ax7.plot(result1.prices, gamma1, label=f'{position1_name} Γ', 
+                    color=color1, alpha=0.7)
+            ax7.plot(result2.prices, gamma2, label=f'{position2_name} Γ', 
+                    color=color2, alpha=0.7)
+            ax7.plot(result1.prices, combined_gamma, label='Combined Γ', 
+                    color=color_combined, linewidth=2.5)
+            ax7.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+            ax7.axvline(x=result1.prices[current_idx], color='red', linestyle=':', alpha=0.3)
+            
+            ax7.set_xlabel('ETH Price (USDC)', fontsize=10)
+            ax7.set_ylabel('Gamma Exposure', fontsize=10)
+            ax7.set_title('Gamma Exposure - Convexity', fontsize=12, fontweight='bold')
+            ax7.legend(loc='best', fontsize=8)
+            ax7.grid(True, alpha=0.3)
+        else:
+            ax7.text(0.5, 0.5, 'Exposure Analysis Not Available', 
+                    ha='center', va='center', transform=ax7.transAxes, fontsize=10)
+            ax7.set_title('Gamma Exposure', fontsize=12, fontweight='bold')
+        
+        # 8. Key Metrics Table
+        ax8 = fig.add_subplot(gs[3, :])
+        ax8.axis('off')
+        
+        # Calculate metrics
+        current_val1 = pos_values1[current_idx]
+        current_val2 = pos_values2[current_idx]
+        current_combined = combined_value[current_idx]
+        
+        max_val1 = np.max(pos_values1)
+        max_val2 = np.max(pos_values2)
+        max_combined = np.max(combined_value)
+        
+        min_val1 = np.min(pos_values1)
+        min_val2 = np.min(pos_values2)
+        min_combined = np.min(combined_value)
+        
+        # Get leverage info
+        lev1 = getattr(result1.config, 'leverage', 1.0)
+        lev2 = getattr(result2.config, 'leverage', 1.0)
+        
+        # Get debt asset info
+        debt1 = getattr(result1.config, 'debt_asset', None)
+        debt2 = getattr(result2.config, 'debt_asset', None)
+        debt1_str = debt1.value if debt1 else 'None'
+        debt2_str = debt2.value if debt2 else 'None'
+        
+        if has_exposure:
+            avg_delta1 = np.mean(np.abs(delta1))
+            avg_delta2 = np.mean(np.abs(delta2))
+            avg_delta_combined = np.mean(np.abs(combined_delta))
+            max_delta1 = np.max(np.abs(delta1))
+            max_delta2 = np.max(np.abs(delta2))
+            max_delta_combined = np.max(np.abs(combined_delta))
+        else:
+            avg_delta1 = avg_delta2 = avg_delta_combined = 0
+            max_delta1 = max_delta2 = max_delta_combined = 0
+        
+        # Create table data
+        table_data = [
+            ['Metric', position1_name, position2_name, 'Combined'],
+            ['Capital Invested', f'${result1.config.capital_asset1:,.0f}', 
+             f'${result2.config.capital_asset1:,.0f}', f'${total_capital:,.0f}'],
+            ['Leverage', f'{lev1:.1f}x', f'{lev2:.1f}x', 
+             f'{(result1.config.capital_asset1*lev1 + result2.config.capital_asset1*lev2)/total_capital:.1f}x avg'],
+            ['Debt Asset', debt1_str, debt2_str, 'Mixed'],
+            ['Current Value', f'${current_val1:,.0f}', 
+             f'${current_val2:,.0f}', f'${current_combined:,.0f}'],
+            ['Current PnL', f'${pnl1[current_idx]:,.0f}', 
+             f'${pnl2[current_idx]:,.0f}', f'${combined_pnl[current_idx]:,.0f}'],
+            ['Current Return', f'{returns1[current_idx]:.2f}%', 
+             f'{returns2[current_idx]:.2f}%', f'{combined_returns[current_idx]:.2f}%'],
+            ['Max Value', f'${max_val1:,.0f}', 
+             f'${max_val2:,.0f}', f'${max_combined:,.0f}'],
+            ['Min Value', f'${min_val1:,.0f}', 
+             f'${min_val2:,.0f}', f'${min_combined:,.0f}'],
+            ['Avg |Delta|', f'{avg_delta1:.4f}', 
+             f'{avg_delta2:.4f}', f'{avg_delta_combined:.4f}'],
+            ['Max |Delta|', f'{max_delta1:.4f}', 
+             f'{max_delta2:.4f}', f'{max_delta_combined:.4f}'],
+        ]
+        
+        # Create table
+        table = ax8.table(cellText=table_data, cellLoc='center', loc='center',
+                         colWidths=[0.25, 0.25, 0.25, 0.25])
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 2)
+        
+        # Style header row
+        for i in range(4):
+            table[(0, i)].set_facecolor('#E8E8E8')
+            table[(0, i)].set_text_props(weight='bold')
+        
+        # Color code PnL rows
+        for i in [5, 6]:  # PnL and Return rows
+            for j in range(1, 4):
+                cell = table[(i, j)]
+                value_str = table_data[i][j].replace('$', '').replace(',', '').replace('%', '')
+                try:
+                    value = float(value_str)
+                    if value > 0:
+                        cell.set_facecolor('#D4EDDA')  # Light green
+                    elif value < 0:
+                        cell.set_facecolor('#F8D7DA')  # Light red
+                except:
+                    pass
+        
+        # Highlight delta metrics
+        if has_exposure:
+            for i in [9, 10]:  # Delta rows
+                cell = table[(i, 3)]
+                if avg_delta_combined > 0.1:
+                    cell.set_facecolor('#FFF3CD')  # Light yellow
+                else:
+                    cell.set_facecolor('#D4EDDA')  # Light green
+        
+        # Add title
+        fig.suptitle(f'Combined LP Strategy Analysis: {position1_name} + {position2_name}', 
+                    fontsize=16, fontweight='bold', y=0.995)
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.99])
+        plt.show()
+        
+        # Print summary
+        print(f"\n{'='*80}")
+        print(f"COMBINED POSITION SUMMARY")
+        print(f"{'='*80}")
+        print(f"\nPositions:")
+        print(f"  • {position1_name}: ${result1.config.capital_asset1:,.0f} @ {lev1:.1f}x ({debt1_str} debt)")
+        print(f"  • {position2_name}: ${result2.config.capital_asset1:,.0f} @ {lev2:.1f}x ({debt2_str} debt)")
+        print(f"\nCombined Portfolio:")
+        print(f"  Total Capital: ${total_capital:,.0f}")
+        print(f"  Current Value: ${current_combined:,.0f}")
+        print(f"  Current PnL: ${combined_pnl[current_idx]:,.0f} ({combined_returns[current_idx]:.2f}%)")
+        
+        if has_exposure:
+            print(f"\nDelta Neutrality:")
+            print(f"  Average |Δ|: {avg_delta_combined:.4f}")
+            print(f"  Maximum |Δ|: {max_delta_combined:.4f}")
+            if avg_delta_combined < 0.05:
+                assessment = '✓ Well Hedged'
+            elif avg_delta_combined < 0.2:
+                assessment = '⚠ Needs Optimization'
+            else:
+                assessment = '✗ Poorly Hedged'
+            print(f"  Assessment: {assessment}")
+        
+        print(f"{'='*80}\n")
 
 
 class ExposureVisualizer:

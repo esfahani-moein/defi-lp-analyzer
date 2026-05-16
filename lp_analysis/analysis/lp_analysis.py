@@ -323,3 +323,62 @@ class ExposureAnalyzer:
             comparison['strategies'].append(strategy_info)
         
         return comparison
+    
+    @staticmethod
+    def calculate_market_exposure(result: SimulationResult) -> Dict:
+        """
+        Calculate market exposure metrics including delta and gamma.
+        
+        This method provides delta (price sensitivity) and gamma (convexity)
+        of the position's exposure, which are critical for understanding
+        hedging effectiveness in delta-neutral strategies.
+        
+        Returns:
+            Dict with delta_exposure and gamma_exposure arrays
+        """
+        prices = np.array(result.prices)
+        
+        # Get exposure profile
+        exposure_profile = ExposureAnalyzer.calculate_exposure_profile(result)
+        
+        if not exposure_profile['is_leveraged']:
+            # For non-leveraged positions, delta is simpler
+            asset0_net_tokens = np.array(exposure_profile['asset0_net_tokens'])
+            delta_exposure = asset0_net_tokens  # Delta ≈ ETH holdings
+            gamma_exposure = np.gradient(delta_exposure, prices)
+            
+            return {
+                'delta_exposure': delta_exposure.tolist(),
+                'gamma_exposure': gamma_exposure.tolist(),
+                'avg_abs_delta': float(np.mean(np.abs(delta_exposure))),
+                'max_abs_delta': float(np.max(np.abs(delta_exposure))),
+                'avg_abs_gamma': float(np.mean(np.abs(gamma_exposure))),
+                'max_abs_gamma': float(np.max(np.abs(gamma_exposure)))
+            }
+        
+        # For leveraged positions, calculate delta from net exposure
+        asset0_net_tokens = np.array(exposure_profile['asset0_net_tokens'])
+        asset0_net_value = np.array(exposure_profile['asset0_net_value'])
+        
+        # Delta: sensitivity of net value to price change
+        # This represents the directional exposure of the position
+        # Positive delta = long exposure, Negative delta = short exposure
+        delta_exposure = asset0_net_tokens + np.gradient(asset0_net_value, prices) / prices
+        
+        # Gamma: rate of change of delta
+        # Shows how delta changes as price moves (convexity)
+        gamma_exposure = np.gradient(delta_exposure, prices)
+        
+        return {
+            'delta_exposure': delta_exposure.tolist(),
+            'gamma_exposure': gamma_exposure.tolist(),
+            'net_asset0_tokens': exposure_profile['asset0_net_tokens'],
+            'net_asset0_value': exposure_profile['asset0_net_value'],
+            'avg_abs_delta': float(np.mean(np.abs(delta_exposure))),
+            'max_abs_delta': float(np.max(np.abs(delta_exposure))),
+            'avg_abs_gamma': float(np.mean(np.abs(gamma_exposure))),
+            'max_abs_gamma': float(np.max(np.abs(gamma_exposure))),
+            'delta_at_current_price': float(delta_exposure[len(delta_exposure) // 2]),
+            'gamma_at_current_price': float(gamma_exposure[len(gamma_exposure) // 2])
+        }
+
