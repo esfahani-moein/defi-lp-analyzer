@@ -2,12 +2,16 @@
 Leveraged LP calculations with debt management.
 Extends base LP calculator with leverage mechanics.
 """
-from typing import List, Union
+from typing import Optional, Sequence, Union
 import numpy as np
 from .lp_calc import LPCalculator
 from .types import (
-    LPConfig, LeveragedLPConfig, LPPosition, LeveragedPosition, DebtAsset,
-    SimulationResult
+    LPConfig, LeveragedLPConfig, LeveragedPosition, SimulationResult
+)
+from .strategy import (
+    create_initial_leveraged_position,
+    simulate_price_path,
+    update_leveraged_position_at_price,
 )
 
 
@@ -32,52 +36,14 @@ class LeveragedLPCalculator(LPCalculator):
         Returns:
             LeveragedPosition with debt tracking
         """
-        # Total capital after leverage
-        borrowed_value = config.capital_asset1 * (config.leverage - 1)
-        total_value = config.capital_asset1 * config.leverage
-        
-        # Calculate LP composition
-        initial_pos = super().calculate_initial_position(
-            config  # LeveragedLPConfig extends LPConfig
-        )
-        
-        # Override total value for leveraged position
-        sp = np.sqrt(config.price_initial)
-        sp_a = np.sqrt(config.price_range.lower)
-        sp_b = np.sqrt(config.price_range.upper)
-        
-        denominator = config.price_initial * (1/sp - 1/sp_b) + (sp - sp_a)
-        liquidity = total_value / denominator
-        
-        amount0, amount1 = self.calculate_amounts_from_liquidity(
-            liquidity, config.price_initial, config.price_range
-        )
-        
-        # Determine debt
-        if config.debt_asset == DebtAsset.ASSET0:
-            debt_amount0 = borrowed_value / config.price_initial
-            debt_amount1 = 0.0
-        elif config.debt_asset == DebtAsset.ASSET1:
-            debt_amount0 = 0.0
-            debt_amount1 = borrowed_value
-        else:
-            debt_amount0 = 0.0
-            debt_amount1 = 0.0
-        
-        return LeveragedPosition(
-            amount0=amount0,
-            amount1=amount1,
-            liquidity=liquidity,
-            current_price=config.price_initial,
-            debt_amount0=debt_amount0,
-            debt_amount1=debt_amount1,
-            config=config
-        )
+        return create_initial_leveraged_position(config)
     
     def update_leveraged_position_at_price(
         self,
         position: LeveragedPosition,
-        new_price: float
+        new_price: float,
+        days_elapsed: float = 0.0,
+        external_debt_price_asset1: Optional[float] = None
     ) -> LeveragedPosition:
         """
         Update leveraged position at new price.
@@ -86,20 +52,11 @@ class LeveragedLPCalculator(LPCalculator):
         Returns:
             Updated LeveragedPosition
         """
-        amount0, amount1 = self.calculate_amounts_from_liquidity(
-            position.liquidity,
+        return update_leveraged_position_at_price(
+            position,
             new_price,
-            position.config.price_range
-        )
-        
-        return LeveragedPosition(
-            amount0=amount0,
-            amount1=amount1,
-            liquidity=position.liquidity,
-            current_price=new_price,
-            debt_amount0=position.debt_amount0,
-            debt_amount1=position.debt_amount1,
-            config=position.config
+            days_elapsed,
+            external_debt_price_asset1,
         )
     
     def simulate_price_range(
@@ -107,7 +64,9 @@ class LeveragedLPCalculator(LPCalculator):
         config: Union[LPConfig, LeveragedLPConfig],
         price_min: float = None,
         price_max: float = None,
-        num_points: int = 300
+        num_points: int = 300,
+        days_elapsed: Optional[Union[float, Sequence[float]]] = None,
+        external_debt_prices_asset1: Optional[Union[float, Sequence[float]]] = None
     ) -> SimulationResult:
         """
         Simulate position across price range.
@@ -129,32 +88,9 @@ class LeveragedLPCalculator(LPCalculator):
             price_max = config.price_range.upper * 1.2
         
         prices = np.linspace(price_min, price_max, num_points)
-        
-        # Check if leveraged or not
-        is_leveraged = isinstance(config, LeveragedLPConfig)
-        
-        if is_leveraged:
-            # Initial leveraged position
-            initial_pos = self.calculate_initial_leveraged_position(config)
-            
-            # Simulate at each price
-            positions = []
-            for price in prices:
-                pos = self.update_leveraged_position_at_price(initial_pos, price)
-                positions.append(pos)
-        else:
-            # Non-leveraged position
-            initial_pos = self.calculate_initial_position(config)
-            
-            # Simulate at each price
-            positions = []
-            for price in prices:
-                pos = self.update_position_at_price(initial_pos, price)
-                positions.append(pos)
-        
-        return SimulationResult(
-            prices=prices.tolist(),
-            positions=positions,
-            metrics={},  # Will be filled by analysis module
-            config=config
+        return simulate_price_path(
+            config,
+            prices,
+            days_elapsed=days_elapsed,
+            external_debt_prices_asset1=external_debt_prices_asset1,
         )

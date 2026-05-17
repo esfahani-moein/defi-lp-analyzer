@@ -3,7 +3,8 @@ Advanced LP analysis: exposure, Greeks, performance metrics.
 """
 import numpy as np
 from typing import Dict, List
-from ..lp_calc.types import LPPosition, LeveragedPosition, SimulationResult
+from ..lp_calc.types import LPPosition, LeveragedLPConfig, LeveragedPosition, SimulationResult
+from ..lp_calc.strategy import create_initial_leveraged_position, create_initial_position
 
 
 class LPAnalyzer:
@@ -105,11 +106,11 @@ class LPAnalyzer:
         Returns:
             List of IL percentages at each price
         """
-        initial_pos = result.positions[0]
+        if isinstance(result.config, LeveragedLPConfig):
+            initial_pos = create_initial_leveraged_position(result.config)
+        else:
+            initial_pos = create_initial_position(result.config)
         initial_price = result.config.price_initial
-        
-        # Hold strategy value at each price
-        hold_value_initial = initial_pos.amount0 * initial_price + initial_pos.amount1
         
         il_list = []
         for pos in result.positions:
@@ -356,17 +357,8 @@ class ExposureAnalyzer:
                 'max_abs_gamma': float(np.max(np.abs(gamma_exposure)))
             }
         
-        # For leveraged positions, calculate delta from net exposure
-        asset0_net_tokens = np.array(exposure_profile['asset0_net_tokens'])
-        asset0_net_value = np.array(exposure_profile['asset0_net_value'])
-        
-        # Delta: sensitivity of net value to price change
-        # This represents the directional exposure of the position
-        # Positive delta = long exposure, Negative delta = short exposure
-        delta_exposure = asset0_net_tokens + np.gradient(asset0_net_value, prices) / prices
-        
-        # Gamma: rate of change of delta
-        # Shows how delta changes as price moves (convexity)
+        values = np.array([p.equity_asset1 for p in result.positions])
+        delta_exposure = np.gradient(values, prices)
         gamma_exposure = np.gradient(delta_exposure, prices)
         
         return {

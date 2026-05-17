@@ -2,8 +2,9 @@
 Risk management: liquidation, VaR, utilization.
 """
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from ..lp_calc.types import LeveragedPosition, SimulationResult
+from ..protocols.lending import arcadia_margin_metrics
 
 
 class RiskAnalyzer:
@@ -18,12 +19,12 @@ class RiskAnalyzer:
         """
         Determine liquidation risk at each position.
         
-        Liquidation occurs when LTV >= liquidation_threshold.
+        Liquidation occurs when Arcadia used margin is not covered by liquidation value.
         
         Returns:
             List of boolean flags (True = at risk)
         """
-        return [pos.ltv >= pos.config.liquidation_threshold for pos in positions]
+        return [pos.margin_state == "liquidatable" for pos in positions]
     
     @staticmethod
     def find_liquidation_prices(
@@ -98,7 +99,11 @@ class RiskAnalyzer:
         Returns:
             List of utilization ratios (0-1+)
         """
-        return [pos.ltv for pos in positions]
+        return [
+            pos.used_margin_asset1 / pos.collateral_value_asset1
+            if pos.collateral_value_asset1 > 0 else float('inf')
+            for pos in positions
+        ]
     
     @staticmethod
     def calculate_daily_borrow_cost(
@@ -130,6 +135,8 @@ class RiskAnalyzer:
             'liquidation_prices': RiskAnalyzer.find_liquidation_prices(result),
             'liquidation_flags': RiskAnalyzer.calculate_liquidation_risk(positions),
             'utilization_ratios': RiskAnalyzer.calculate_utilization_ratios(positions),
+            'margin': [arcadia_margin_metrics(pos) for pos in positions],
+            'ltv': [pos.ltv for pos in positions],
             'var_95': RiskAnalyzer.calculate_value_at_risk(pnl, 0.95) if pnl else None,
             'cvar_95': RiskAnalyzer.calculate_expected_shortfall(pnl, 0.95) if pnl else None,
             'daily_cost': RiskAnalyzer.calculate_daily_borrow_cost(positions[0])
