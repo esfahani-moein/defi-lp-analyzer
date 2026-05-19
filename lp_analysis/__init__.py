@@ -33,6 +33,14 @@ from .cl_math import (
     liquidity_from_value_asset1,
     value_asset1,
 )
+from .compound import (
+    CompoundPortfolio,
+    OuterLending,
+    OuterLendingPath,
+    in_range_mask,
+    lp_fees_path,
+    simulate_outer,
+)
 from .frame import to_frame
 from .lending import (
     MarginMetrics,
@@ -72,7 +80,7 @@ from .types import (
     StrategyConfig,
 )
 
-__version__ = "3.1.0"
+__version__ = "4.0.0"
 
 __all__ = [
     # Core types
@@ -89,6 +97,9 @@ __all__ = [
     # Strategy engine
     "SimulationResult", "simulate", "open_position", "step_position",
     "linear_price_sweep",
+    # Compound (outer-loop) strategies
+    "OuterLending", "OuterLendingPath", "simulate_outer",
+    "CompoundPortfolio", "lp_fees_path", "in_range_mask",
     # Analytics
     "PnLReport", "Greeks", "ExposureReport",
     "compute_pnl", "compute_greeks", "compute_exposure",
